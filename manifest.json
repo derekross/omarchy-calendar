@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "id": "derekross.calendar",
+  "name": "Calendar",
+  "version": "0.1.0",
+  "author": "Derek Ross",
+  "license": "MIT",
+  "description": "Upcoming events from khal in the bar, an agenda with meeting links and directions, and notifications before each event. Works with any calendar khal reads: Google, CalDAV, Nextcloud, Fastmail, iCloud, local .ics.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Calendar",
+    "description": "Next event today, with an agenda popup",
+    "category": "Time",
+    "allowMultiple": false,
+    "defaultSection": "center",
+    "defaults": {
+      "leadMinutes": 10,
+      "notifications": true,
+      "agendaDays": 7,
+      "maxTitleLength": 24,
+      "showWhenIdle": true,
+      "syncIntervalMinutes": 15,
+      "syncCommand": "vdirsyncer sync",
+      "timeFormat": "Match khal",
+      "mapsProvider": "Google Maps"
+    },
+    "schema": [
+      {
+        "key": "notifications",
+        "type": "boolean",
+        "label": "Notifications",
+        "description": "Notify before each timed event.",
+        "defaultValue": true
+      },
+      {
+        "key": "leadMinutes",
+        "type": "integer",
+        "label": "Notify minutes before",
+        "min": 0,
+        "max": 240,
+        "step": 5,
+        "defaultValue": 10
+      },
+      {
+        "key": "agendaDays",
+        "type": "integer",
+        "label": "Agenda days",
+        "min": 1,
+        "max": 60,
+        "step": 1,
+        "defaultValue": 7
+      },
+      {
+        "key": "maxTitleLength",
+        "type": "integer",
+        "label": "Bar title length",
+        "description": "0 shows the full title.",
+        "min": 0,
+        "max": 120,
+        "step": 4,
+        "defaultValue": 24
+      },
+      {
+        "key": "timeFormat",
+        "type": "enum",
+        "label": "Time format",
+        "options": [
+          "Match khal",
+          "12-hour",
+          "24-hour"
+        ],
+        "defaultValue": "Match khal"
+      },
+      {
+        "key": "mapsProvider",
+        "type": "enum",
+        "label": "Directions",
+        "description": "Map site used for event locations.",
+        "options": [
+          "Google Maps",
+          "OpenStreetMap",
+          "Apple Maps"
+        ],
+        "defaultValue": "Google Maps"
+      },
+      {
+        "key": "showWhenIdle",
+        "type": "boolean",
+        "label": "Show icon with no events",
+        "defaultValue": true
+      },
+      {
+        "key": "syncIntervalMinutes",
+        "type": "integer",
+        "label": "Sync every (minutes)",
+        "description": "0 turns syncing off, e.g. when a systemd timer already runs it.",
+        "min": 0,
+        "max": 1440,
+        "step": 5,
+        "defaultValue": 15
+      },
+      {
+        "key": "syncCommand",
+        "type": "string",
+        "label": "Sync command",
+        "description": "Run with sh -c. Leave empty to never sync.",
+        "defaultValue": "vdirsyncer sync"
+      }
+    ]
+  }
+}
