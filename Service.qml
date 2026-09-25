@@ -63,6 +63,11 @@ Item {
     timeFormat = String(s.timeFormat || "Match khal")
     mapsProvider = String(s.mapsProvider || "Google Maps")
     syncCommand = s.syncCommand === undefined || s.syncCommand === null ? "vdirsyncer sync" : String(s.syncCommand)
+    // Nothing syncs or notifies until the user's settings are in.
+    if (!settled) {
+      settled = true
+      Qt.callLater(checkNotifications)
+    }
   }
 
   onAgendaDaysChanged: Qt.callLater(refresh)
@@ -112,6 +117,7 @@ Item {
   function sync() {
     if (syncing || syncCommand.trim() === "") return
     syncing = true
+    syncWatchdog.fired = false
     syncProc.command = ["sh", "-c", syncCommand]
     syncProc.running = true
   }
@@ -148,7 +154,7 @@ Item {
   }
 
   function openUrl(url) {
-    if (url) Quickshell.execDetached(["xdg-open", String(url)])
+    if (Model.isOpenableUrl(url)) Quickshell.execDetached(["xdg-open", String(url)])
   }
 
   function copyText(text) {
@@ -351,9 +357,10 @@ Item {
     }
   }
 
+  // Fallback for a service running without its bar widget (defaults apply).
   Timer {
-    interval: 5000
-    running: true
+    interval: 30000
+    running: !root.settled
     onTriggered: {
       root.settled = true
       root.checkNotifications()

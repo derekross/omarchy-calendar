@@ -270,11 +270,14 @@ function normalizeEvent(row, formats) {
   var end = allDay ? toMs(ed, null) + 86400000 : (et ? toMs(ed, et) : start)
   if (end < start) end = start
   var uid = String(row.uid || "")
+  var calendar = String(row.calendar || "")
+  var title = String(row.title || "(untitled)")
   return {
-    key: uid + "|" + start,
+    // Events without a UID are told apart by what they show.
+    key: calendar + "|" + (uid || title + "|" + end) + "|" + start,
     uid: uid,
-    title: String(row.title || "(untitled)"),
-    calendar: String(row.calendar || ""),
+    title: title,
+    calendar: calendar,
     color: qmlColor(row["calendar-color"]),
     location: String(row.location || ""),
     description: cleanDescription(row.description),
@@ -298,7 +301,8 @@ function dueNotifications(events, now, leadMinutes, notified) {
   var due = []
   for (var i = 0; i < events.length; i++) {
     var ev = events[i]
-    if (ev.allDay || ev.start < now - GRACE_MS || ev.start > horizon) continue
+    if (ev.allDay || ev.status === "CANCELLED") continue
+    if (ev.start < now - GRACE_MS || ev.start > horizon) continue
     if (notified && notified[ev.key]) continue
     due.push(ev)
   }
@@ -344,7 +348,8 @@ function notificationTitle(ev) {
 
 function notificationBody(ev, now, use24h) {
   var body = "Starts at " + formatClock(ev.start, use24h) + " (" + formatUntil(ev.start, now) + ")"
-  if (ev.location) body += "\n" + ev.location
+  // The notification server renders body markup; invite text is not markup.
+  if (ev.location) body += "\n" + escapeHtml(ev.location)
   return body
 }
 
@@ -523,9 +528,16 @@ function meetingService(url) {
   return ""
 }
 
+// Links in invites come from whoever sent them; only web and meeting-app
+// links are offered, never file://, smb:// or arbitrary app handlers.
+function isOpenableUrl(url) {
+  return /^(?:https?|zoommtg|zoomus|msteams):\/\/[^\s]/i.test(String(url || ""))
+}
+
 function linkLabel(url) {
-  var m = String(url).match(/^[a-z]+:\/\/(?:www\.)?([^\/?#]+)/i)
-  return m ? m[1] : url
+  var m = String(url).match(/^([a-z]+):\/\/(?:www\.)?([^\/?#]+)/i)
+  if (!m) return url
+  return /^https?$/i.test(m[1]) ? m[2] : m[1].toLowerCase() + "://" + m[2]
 }
 
 // RFC 5545: lines folded with CRLF + one space/tab; values escape , ; \ and n.
@@ -668,7 +680,7 @@ function eventDetails(ev, ics, mapsProvider) {
   var candidates = []
   function add(url) {
     url = trimUrl(String(url || "").trim())
-    if (url && candidates.indexOf(url) === -1) candidates.push(url)
+    if (isOpenableUrl(url) && candidates.indexOf(url) === -1) candidates.push(url)
   }
   if (ics && ics.conference) add(ics.conference)
   add(ev.url)
@@ -766,6 +778,7 @@ var ICS_LOOKUP_SCRIPT = [
   "[ -f \"$cfg\" ] || cfg=\"$HOME/.khal/khal.conf\"",
   "[ -f \"$cfg\" ] || exit 3",
   "shopt -s nullglob",
+  "IFS=$'\\n'",
   "dirs=()",
   "while IFS= read -r p; do",
   "  p=\"${p%%#*}\"; p=\"${p%\"${p##*[![:space:]]}\"}\"; p=\"${p#[\\\"\\']}\"; p=\"${p%[\\\"\\']}\"",
@@ -773,5 +786,11 @@ var ICS_LOOKUP_SCRIPT = [
   "  for d in $p; do [ -d \"$d\" ] && dirs+=(\"$d\"); done",
   "done < <(sed -n 's/^[[:space:]]*path[[:space:]]*=[[:space:]]*//p' \"$cfg\")",
   "[ ${#dirs[@]} -gt 0 ] || exit 3",
-  "grep -rlF --include='*.ics' -e \"UID:${1:0:60}\" \"${dirs[@]}\" 2>/dev/null | head -n 8 | while IFS= read -r f; do cat \"$f\"; echo; done"
+  // Match UID as a property at the start of a line (not inside a description),
+  // on its first 60 characters since long lines are folded. The file named
+  // after the UID goes first; each file is read up to 256 KiB.
+  "re=$(printf '%s' \"${1:0:60}\" | sed 's/[][\\\\.*^$/+?(){}|]/\\\\&/g')",
+  "files=$(grep -rlE --include='*.ics' -e \"^UID:$re\" \"${dirs[@]}\" 2>/dev/null | head -n 8)",
+  "for f in $files; do [ \"${f##*/}\" = \"$1.ics\" ] && { head -c 262144 \"$f\"; echo; }; done",
+  "for f in $files; do [ \"${f##*/}\" = \"$1.ics\" ] || { head -c 262144 \"$f\"; echo; }; done"
 ].join("\n")

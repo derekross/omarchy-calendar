@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "ClockModel.js" as ClockModel
@@ -32,6 +33,16 @@ BarWidget {
   readonly property string activeFormat: configuredFormat
   readonly property string displayText: formatted(displayDate)
   readonly property var verticalLines: displayText.split("\n")
+
+  function refresh() {
+    Date.timeZoneUpdated()
+    displayDate = new Date()
+    if (panelLoader.item && panelLoader.item.refresh) panelLoader.item.refresh()
+  }
+
+  function toggleWeekStart() {
+    if (panelLoader.item) panelLoader.item.toggleWeekStart()
+  }
 
   function cycleFormat() {
     var current = String(configuredFormat)
@@ -111,6 +122,21 @@ BarWidget {
       root.injectPanel()
       Qt.callLater(root.injectPanel)
     }
+  }
+
+  // Standing in for the stock clock, keep answering its IPC target:
+  // omarchy-menu-timezone and user bindings call `omarchy.clock refresh`.
+  IpcHandler {
+    target: "omarchy.clock"
+
+    function refresh(): void { root.broadcast("refresh") }
+    function cycleFormat(): void { root.cycleFormat() }
+    function toggleWeekStart(): void { root.toggleWeekStart() }
+    function open(): void { root.open() }
+    function close(): void { root.close() }
+    function show(): void { root.open() }
+    function hide(): void { root.close() }
+    function toggle(): void { root.togglePanel() }
   }
 
   WidgetButton {

@@ -1,7 +1,8 @@
 .pragma library
 
 // Copied from Omarchy's built-in clock (shell/plugins/panels/clock/Model.js,
-// https://github.com/basecamp/omarchy, MIT license) so this plugin can stand
+// https://github.com/basecamp/omarchy, MIT license,
+// Copyright (c) David Heinemeier Hansson) so this plugin can stand
 // in for it. Keep it close to upstream; calendar logic lives in Model.js.
 //
 // Pure date and format math for the clock widget and its calendar panel.

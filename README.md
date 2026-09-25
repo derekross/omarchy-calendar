@@ -16,6 +16,7 @@ It reads events with [khal](https://khal.readthedocs.io), so it works with any c
 - Omarchy 4 or newer (the Quickshell-based `omarchy-shell`)
 - `khal` configured with at least one calendar. `khal list` should print your events.
 - Optional: `vdirsyncer` (or any other sync tool) to pull events from a server
+- Already on Omarchy: `bash`, `grep`, `xdg-utils` and `wl-clipboard`
 
 ```bash
 sudo pacman -S khal vdirsyncer
@@ -39,7 +40,15 @@ To put the stock clock back, disable the plugin:
 omarchy plugin disable derekross.calendar
 ```
 
-Update with `omarchy plugin update derekross.calendar`. Uninstall with `omarchy plugin remove derekross.calendar`.
+Update with `omarchy plugin update derekross.calendar`.
+
+## Remove
+
+```bash
+omarchy plugin remove derekross.calendar
+```
+
+This removes the plugin and puts the stock clock back. If you deleted the plugin folder by hand instead, the stock clock stays switched off; turn it back on with `omarchy plugin enable omarchy.clock`.
 
 ### Upgrading from 0.1
 
@@ -49,6 +58,8 @@ Version 0.1 was a separate bar widget next to the clock. If the stock clock and 
 omarchy bar move derekross.calendar --before omarchy.clock
 omarchy plugin disable omarchy.clock
 ```
+
+(If you remove this plugin later, run `omarchy plugin enable omarchy.clock` to get the stock clock back.)
 
 If you had changed the clock's label format, set it again with `omarchy bar set derekross.calendar format "<format>"`.
 
@@ -100,6 +111,8 @@ If a systemd timer or cron job already runs vdirsyncer, set `syncIntervalMinutes
 Notifications and syncing come from the plugin's background service, so they keep working even if you remove the clock from the bar. Without the widget in the bar, the defaults above apply.
 
 ## Scripting
+
+It also answers the stock clock's IPC target, so `omarchy-shell omarchy.clock refresh|toggle|cycleFormat|toggleWeekStart` keep working.
 
 ```bash
 omarchy-shell shell toggle omarchy.clock   # open or close the calendar
@@ -167,7 +180,26 @@ Point khal at any folder of `.ics` files and set `syncCommand` to an empty strin
 - `BarWidget.qml` and `Panel.qml` read events from the service. `Model.js` holds all the parsing and scheduling logic, with no QML, so it can be tested with node.
 - The clock label, month grid, year and life bars, and `ClockModel.js` are adapted from Omarchy's built-in clock (`shell/plugins/panels/clock`, MIT). They are kept close to upstream so upstream changes are easy to bring in.
 
-The plugin only runs `khal`, your sync command, `grep`/`cat` to read your own calendar files, `mkdir` for its state folder, `omarchy-notification-send`, `xdg-open` for links you click, and `wl-copy` when you copy a meeting link. It makes no network requests of its own.
+## Security
+
+Calendar invites come from other people, so everything in them is treated as untrusted:
+
+- Titles, locations, descriptions and guest names are shown as plain text. The description's links are rebuilt from escaped text, and notification text is escaped too.
+- Only `https://`, `http://` and meeting-app links (`zoommtg://`, `zoomus://`, `msteams://`) from an invite are offered and opened. Links with other schemes (`file://`, `smb://`, other app handlers) are dropped. Non-web links show their scheme.
+- Nothing from an invite ever reaches a shell. Every command runs with a fixed argument list. The event UID is passed to the `.ics` lookup as an argument and matched as escaped text.
+
+What the plugin runs:
+
+- `khal`
+- your sync command, through `sh -c` (it's your own setting in `shell.json`, `vdirsyncer sync` by default)
+- `bash` with `grep`/`head` to read your own calendar files
+- `mkdir` for its state folder
+- `omarchy-notification-send`
+- `xdg-open` for links you click
+- `wl-copy` when you copy a meeting link
+- `omarchy-menu-timezone` on middle click, like the stock clock
+
+It makes no network requests of its own and needs no `sudo`.
 
 ## Development
 

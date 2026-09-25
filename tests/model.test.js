@@ -166,9 +166,9 @@ test("finds the meeting link and separates other links", () => {
 
 test("recognizes meeting services in descriptions and locations", () => {
   const cases = [
-    ["https://us06web.zoom.us/j/82398636305?pwd=x", "Zoom"],
+    ["https://us02web.zoom.us/j/12345678901?pwd=x", "Zoom"],
     ["https://teams.microsoft.com/l/meetup-join/19%3ameeting", "Microsoft Teams"],
-    ["https://meet.jit.si/SoapboxStandup", "Jitsi"],
+    ["https://meet.jit.si/ExampleStandup", "Jitsi"],
     ["https://acme.webex.com/meet/bob", "Webex"],
     ["https://applications.zoom.us/addon/calendar", ""],
     ["https://support.google.com/a/users/answer/9282720", ""]
@@ -278,4 +278,38 @@ test("lists a chosen day's events, including ones that span it", () => {
   const now = new Date(2026, 8, 20, 12, 0).getTime()
   const rows = M.dayAgendaRows(events, new Date(2026, 8, 24, 15, 0).getTime(), now)
   same(rows.map(r => r.kind === "day" ? r.label : r.event.uid), ["Thursday, Sep 24", "conf", "evening"])
+})
+
+test("offers only web and meeting-app links from invites", () => {
+  assert.equal(M.isOpenableUrl("https://example.com/a"), true)
+  assert.equal(M.isOpenableUrl("zoommtg://zoom.us/join?confno=1"), true)
+  for (const bad of ["file:///etc/passwd", "smb://host/share", "vscode://x/y", "javascript:alert(1)", "-https://x", ""])
+    assert.equal(M.isOpenableUrl(bad), false, bad)
+  const ev = { description: "", url: "file:///etc/passwd", location: "", organizer: null }
+  const d = M.eventDetails(ev, { conference: "vscode://evil/x", url: "https://example.com/doc" }, "Google Maps")
+  same(d.links.map(l => l.url), ["https://example.com/doc"])
+  assert.equal(d.meeting, null)
+  assert.equal(M.linkLabel("msteams://teams.microsoft.com/l/x"), "msteams://teams.microsoft.com")
+  assert.equal(M.linkLabel("https://www.example.com/x"), "example.com")
+})
+
+test("escapes invite markup in notification bodies", () => {
+  const body = M.notificationBody({ start: 0, location: "<b>URGENT</b> & co" }, 0, true)
+  assert.match(body, /&lt;b&gt;URGENT&lt;\/b&gt; &amp; co/)
+})
+
+test("skips cancelled events when notifying", () => {
+  const now = Date.now()
+  const events = [
+    { key: "a", allDay: false, start: now + 60000, status: "CANCELLED" },
+    { key: "b", allDay: false, start: now + 60000, status: "" }
+  ]
+  same(M.dueNotifications(events, now, 10, {}).map(e => e.key), ["b"])
+})
+
+test("keeps distinct events that have no UID", () => {
+  const r = (title, uid, calendar) => row({ title, uid, calendar })
+  const out = M.parseEvents(JSON.stringify([r("One", ""), r("Two", ""), r("Same", "u1", "work"), r("Same", "u1", "home")]), ISO)
+  assert.equal(out.length, 4)
+  assert.equal(M.parseEvents(JSON.stringify([r("One", ""), r("One", "")]), ISO).length, 1)
 })

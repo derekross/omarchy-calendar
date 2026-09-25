@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "derekross.calendar",
   "name": "Calendar Clock",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": "Derek Ross",
   "license": "MIT",
   "description": "Omarchy's clock and calendar with your events in it: dots on the month grid, an agenda with meeting links and directions, and notifications before each event. Replaces the built-in clock. Works with any calendar khal reads: Google, CalDAV, Nextcloud, Fastmail, iCloud, local .ics.",
