@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "id": "derekross.calendar",
-  "name": "Calendar",
-  "version": "0.1.0",
+  "name": "Calendar Clock",
+  "version": "0.2.0",
   "author": "Derek Ross",
   "license": "MIT",
-  "description": "Upcoming events from khal in the bar, an agenda with meeting links and directions, and notifications before each event. Works with any calendar khal reads: Google, CalDAV, Nextcloud, Fastmail, iCloud, local .ics.",
+  "description": "Omarchy's clock and calendar with your events in it: dots on the month grid, an agenda with meeting links and directions, and notifications before each event. Replaces the built-in clock. Works with any calendar khal reads: Google, CalDAV, Nextcloud, Fastmail, iCloud, local .ics.",
   "kinds": [
     "service",
     "bar-widget"
@@ -15,9 +15,12 @@
     "service": "Service.qml",
     "barWidget": "BarWidget.qml"
   },
+  "omarchy": {
+    "clonedFrom": "omarchy.clock"
+  },
   "barWidget": {
-    "displayName": "Calendar",
-    "description": "Next event today, with an agenda popup",
+    "displayName": "Calendar Clock",
+    "description": "Clock with a calendar popup that shows your khal events",
     "category": "Time",
     "allowMultiple": false,
     "defaultSection": "center",
@@ -25,14 +28,26 @@
       "leadMinutes": 10,
       "notifications": true,
       "agendaDays": 7,
-      "maxTitleLength": 24,
-      "showWhenIdle": true,
       "syncIntervalMinutes": 15,
       "syncCommand": "vdirsyncer sync",
       "timeFormat": "Match khal",
       "mapsProvider": "Google Maps"
     },
     "schema": [
+      {
+        "key": "format",
+        "type": "string",
+        "label": "Label format",
+        "description": "Qt date format, e.g. dddd HH:mm. Right-click the clock to cycle presets.",
+        "defaultValue": "dddd HH:mm"
+      },
+      {
+        "key": "formatAlt",
+        "type": "string",
+        "label": "Alternate format",
+        "description": "Added to the right-click cycle.",
+        "defaultValue": "d MMMM 'W'ww yyyy"
+      },
       {
         "key": "notifications",
         "type": "boolean",
@@ -59,16 +74,6 @@
         "defaultValue": 7
       },
       {
-        "key": "maxTitleLength",
-        "type": "integer",
-        "label": "Bar title length",
-        "description": "0 shows the full title.",
-        "min": 0,
-        "max": 120,
-        "step": 4,
-        "defaultValue": 24
-      },
-      {
         "key": "timeFormat",
         "type": "enum",
         "label": "Time format",
@@ -90,12 +95,6 @@
           "Apple Maps"
         ],
         "defaultValue": "Google Maps"
-      },
-      {
-        "key": "showWhenIdle",
-        "type": "boolean",
-        "label": "Show icon with no events",
-        "defaultValue": true
       },
       {
         "key": "syncIntervalMinutes",

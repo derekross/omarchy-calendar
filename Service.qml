@@ -6,7 +6,8 @@ import "Model.js" as Model
 // Headless calendar service. Reads upcoming events from khal once a minute,
 // sends a desktop notification shortly before each timed event, and can run a
 // sync command (vdirsyncer by default) on its own interval. The bar widget
-// reads `events` from here and pushes its settings in through configure().
+// reads `events` from here and pushes its settings in through configure();
+// the panel asks for other months through loadMonth().
 Item {
   id: root
 
@@ -43,6 +44,13 @@ Item {
   property var _detailQueue: []
   property string _detailUid: ""
 
+  // Events for months browsed in the panel, keyed "yyyy-MM", each stored as
+  // { generation, events }. Bumping rangeGeneration marks every month stale
+  // without dropping it, so the grid keeps its dots while a month reloads.
+  property var monthEvents: ({})
+  property int rangeGeneration: 0
+  property string _pendingRange: ""
+
   readonly property bool use24h: Model.resolveUse24h(timeFormat, formats ? formats.use24h : true)
   readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state")) + "/omarchy-calendar"
 
@@ -67,6 +75,38 @@ Item {
     if (listProc.running) return
     listProc.command = Model.khalListArgs(agendaDays)
     listProc.running = true
+  }
+
+  // A refresh the user asked for: re-read khal for browsed months too.
+  function reload() {
+    invalidateMonths()
+    refresh()
+  }
+
+  function invalidateMonths() {
+    rangeGeneration++
+  }
+
+  // Only the newest request waits: stepping quickly through months should
+  // not queue a khal run for every month passed on the way.
+  function loadMonth(year, month) {
+    var key = Model.monthKey(year, month)
+    var entry = monthEvents[key]
+    if (entry && entry.generation === rangeGeneration) return
+    if (key === rangeProc.key && rangeProc.running && rangeProc.generation === rangeGeneration) return
+    _pendingRange = key
+    _nextRange()
+  }
+
+  function _nextRange() {
+    if (rangeProc.running || !_pendingRange || !formats) return
+    var parts = _pendingRange.split("-")
+    var range = Model.monthRange(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1)
+    rangeProc.key = _pendingRange
+    rangeProc.generation = rangeGeneration
+    _pendingRange = ""
+    rangeProc.command = Model.khalRangeArgs(range.start, range.days, formats)
+    rangeProc.running = true
   }
 
   function sync() {
@@ -183,6 +223,7 @@ Item {
       root.formats = parsed
       root.lastError = ""
       Qt.callLater(root.refresh)
+      Qt.callLater(root._nextRange)
     }
   }
 
@@ -210,6 +251,32 @@ Item {
       root.lastRefresh = Date.now()
       root.lastError = ""
       root.checkNotifications()
+    }
+  }
+
+  Process {
+    id: rangeProc
+    property string key: ""
+    property int generation: 0
+    property string output: ""
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: rangeProc.output = text
+    }
+    onExited: function(exitCode) {
+      var text = rangeProc.output
+      rangeProc.output = ""
+      if (exitCode === 0) {
+        if (typeof Date.timeZoneUpdated === "function") Date.timeZoneUpdated()
+        var next = ({})
+        for (var k in root.monthEvents) next[k] = root.monthEvents[k]
+        next[rangeProc.key] = { generation: rangeProc.generation, events: Model.parseEvents(text, root.formats) }
+        root.monthEvents = next
+      }
+      // Invalidated while it ran: read this month again.
+      if (rangeProc.generation !== root.rangeGeneration && root._pendingRange === "")
+        root._pendingRange = rangeProc.key
+      Qt.callLater(root._nextRange)
     }
   }
 
@@ -248,6 +315,7 @@ Item {
       root.syncError = ""
       root.lastSync = Date.now()
       root.icsDetails = ({})
+      root.invalidateMonths()
       // Re-read formats too, so a changed khal [locale] applies without a restart.
       if (!formatsProc.running) formatsProc.running = true
     }
@@ -303,12 +371,13 @@ Item {
   IpcHandler {
     target: "derekross.calendar"
 
-    function refresh(): void { root.refresh() }
+    function refresh(): void { root.reload() }
     function sync(): void { root.sync() }
     function status(): string {
       return JSON.stringify({
         khal: root.khalAvailable,
         events: root.events.length,
+        months: Object.keys(root.monthEvents).sort(),
         syncing: root.syncing,
         lastSync: root.lastSync,
         lastRefresh: root.lastRefresh,

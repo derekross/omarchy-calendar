@@ -2,10 +2,13 @@ import QtQuick
 import Quickshell
 import qs.Commons
 import qs.Ui
-import "Model.js" as Model
+import "ClockModel.js" as ClockModel
 
-// Bar pill showing the current or next timed event today. Left click opens the
-// agenda, right click syncs now, middle click re-reads khal.
+// Date/time label for the bar, standing in for Omarchy's clock (the manifest
+// declares clonedFrom: omarchy.clock). It behaves like the stock clock: left
+// click opens the calendar, right click walks the label formats, middle click
+// opens the timezone picker. The calendar popup adds khal events to the
+// clock's month grid.
 BarWidget {
   id: root
   moduleName: "derekross.calendar"
@@ -13,27 +16,47 @@ BarWidget {
   readonly property var service: bar && bar.shell && typeof bar.shell.serviceFor === "function"
     ? bar.shell.serviceFor("derekross.calendar") : null
 
-  readonly property int maxTitleLength: Model.clampInt(setting("maxTitleLength", 24), 24, 0, 120)
-  readonly property bool showWhenIdle: setting("showWhenIdle", true) !== false
+  property date displayDate: clock.date
 
-  property double now: Date.now()
-  readonly property var upcoming: service ? Model.nextEvent(service.events, now) : null
-  readonly property string label: upcoming
-    ? "󰃭  " + Model.barLabel(upcoming, now, service.use24h, maxTitleLength)
-    : (showWhenIdle ? "󰃭" : "")
+  readonly property string configuredFormat: vertical
+    ? setting("verticalFormat", "HH\n—\nmm")
+    : setting("format", "dddd HH:mm")
+  readonly property string configuredAltFormat: vertical
+    ? setting("verticalFormatAlt", "dd\nMMM\n'W'ww\n''yy")
+    : setting("formatAlt", "d MMMM 'W'ww yyyy")
+
+  readonly property var formatRing: ClockModel.clockFormatRing(configuredFormat, configuredAltFormat, ClockModel.clockFormats(vertical))
+
+  // What the bar shows is what shell.json stores, so a cycled format is the
+  // format from then on rather than something that reverts on restart.
+  readonly property string activeFormat: configuredFormat
+  readonly property string displayText: formatted(displayDate)
+  readonly property var verticalLines: displayText.split("\n")
+
+  function cycleFormat() {
+    var current = String(configuredFormat)
+    var next = ClockModel.nextClockFormat(formatRing, current)
+    if (next === "" || next === current) return
+
+    var entry = { id: root.moduleName }
+    for (var key in root.settings) if (key !== "id") entry[key] = root.settings[key]
+    entry[vertical ? "verticalFormat" : "format"] = next
+
+    // Applied locally first so the label changes on the click itself; the
+    // shell.json write comes back through the bar as the same value.
+    root.settings = entry
+    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
+      root.bar.shell.updateEntryInline(root.moduleName, entry)
+  }
+
+  function formatted(date) {
+    return Qt.formatDateTime(date, activeFormat.replace(/ww/g, ClockModel.isoWeekLiteral(date.getFullYear(), date.getMonth(), date.getDate())))
+  }
 
   // The service owns settings so notifications work without the widget;
   // forward this entry's shell.json values whenever they change.
   function pushSettings() {
     if (service && typeof service.configure === "function") service.configure(settings)
-  }
-  onServiceChanged: {
-    pushSettings()
-    injectPanel()
-  }
-  onSettingsChanged: {
-    pushSettings()
-    injectPanel()
   }
 
   function injectPanel() {
@@ -45,24 +68,38 @@ BarWidget {
     if ("hostWidget" in target) target.hostWidget = root
     if ("service" in target) target.service = root.service
   }
-  onBarChanged: injectPanel()
 
-  // Shape contract for the bar's panel routing: open/close/opened on the root.
+  onBarChanged: injectPanel()
+  onServiceChanged: {
+    pushSettings()
+    injectPanel()
+  }
+  onSettingsChanged: {
+    pushSettings()
+    injectPanel()
+  }
+
+  // Shape contract for the bar's panel routing (Bar.findPanelWidget):
+  // open/close/opened on the bar-widget root.
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
-  function open() { if (panelLoader.item) panelLoader.item.openFromHotkey() }
+  function open() { if (panelLoader.item) panelLoader.item.open() }
   function close() { if (panelLoader.item) panelLoader.item.close() }
   function togglePanel() { if (panelLoader.item) panelLoader.item.toggle() }
+
+  // Same mark under the label as the stock clock gets while its panel is open.
+  readonly property real openPanelIndicatorWidth: button.labelWidth
+  readonly property real openPanelIndicatorHeight: Math.max(Style.space(10), Math.round(Style.bar.iconSlot * 0.55))
 
   readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
   function closeForPopoutSwitch() { if (panelLoader.item) panelLoader.item.closeForPopoutSwitch() }
 
-  visible: label !== ""
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
   SystemClock {
+    id: clock
     precision: SystemClock.Minutes
-    onDateChanged: root.now = Date.now()
+    onDateChanged: root.displayDate = date
   }
 
   Loader {
@@ -80,16 +117,38 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.vertical ? "󰃭" : root.label
+    text: root.vertical ? "" : root.displayText
+    labelVisible: !root.vertical
+    hasVisualContent: root.vertical ? root.verticalLines.length > 0 : text !== ""
+    fixedHeight: root.vertical ? root.verticalLines.length * Style.bar.iconSlot : -1
     horizontalMargin: 8.75
     verticalPadding: 8.75
-    tooltipText: ""
 
     onPressed: function(b) {
-      if (!root.service) return
-      if (b === Qt.RightButton) root.service.sync()
-      else if (b === Qt.MiddleButton) root.service.refresh()
+      if (b === Qt.RightButton) root.cycleFormat()
+      else if (b === Qt.MiddleButton) { if (root.bar) root.bar.run("omarchy-menu-timezone") }
       else root.togglePanel()
+    }
+
+    Column {
+      visible: root.vertical
+      anchors.fill: parent
+
+      Repeater {
+        model: root.verticalLines
+
+        OpticalGlyph {
+          required property string modelData
+          width: button.width
+          height: Style.bar.iconSlot
+          text: modelData
+          fontFamily: button.fontFamily
+          fontSize: modelData.length > 3
+            ? button.fontSize * 0.9
+            : button.fontSize
+          color: button.foreground
+        }
+      }
     }
   }
 }

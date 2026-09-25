@@ -75,6 +75,8 @@ function parseFormats(text) {
   var result = {
     date: date,
     time: time,
+    // Kept to write dates back in the same format; see formatKhalDate.
+    longdate: samples.longdateformat,
     // Show times the way the user's khal shows them.
     use24h: time.fields.indexOf("p") === -1,
     error: ""
@@ -90,6 +92,45 @@ function parseFormats(text) {
   else if (!t || t.hour !== 21 || t.minute !== 45)
     result.error = "Unsupported khal time format \"" + samples.timeformat + "\". Set timeformat = %H:%M in khal's [locale] section."
   return result
+}
+
+var MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
+  "August", "September", "October", "November", "December"]
+
+// The reverse of parseDate: render a day the way khal's longdateformat would,
+// by swapping each field of the sample for the same field of `ms`. khal only
+// reads dates on the command line in the user's own formats, so this is how
+// a range starting on an arbitrary day gets asked for.
+function formatKhalDate(ms, sample) {
+  var d = new Date(ms)
+  var values = {
+    "2013": String(d.getFullYear()),
+    "December": MONTH_NAMES[d.getMonth()],
+    "Saturday": WEEKDAYS[d.getDay()],
+    "Dec": MONTH_NAMES[d.getMonth()].substr(0, 3),
+    "Sat": WEEKDAYS[d.getDay()].substr(0, 3),
+    "12": pad(d.getMonth() + 1),
+    "21": pad(d.getDate()),
+    "13": pad(d.getFullYear() % 100)
+  }
+  var text = String(sample || "")
+  var out = ""
+  var i = 0
+  while (i < text.length) {
+    var matched = ""
+    for (var t = 0; t < SAMPLE_DATE_TOKENS.length; t++) {
+      var tok = SAMPLE_DATE_TOKENS[t][0]
+      if (text.substr(i, tok.length) === tok && tok.length > matched.length) matched = tok
+    }
+    if (matched) {
+      out += values[matched]
+      i += matched.length
+    } else {
+      out += text.charAt(i)
+      i++
+    }
+  }
+  return out
 }
 
 function monthFromName(name) {
@@ -169,6 +210,25 @@ function khalListArgs(days) {
   for (var i = 0; i < JSON_FIELDS.length; i++) args.push("--json", JSON_FIELDS[i])
   args.push("--day-format", "", "today", Math.max(1, days) + "d")
   return args
+}
+
+// Events from `startMs` for `days` days, for browsing months other than the
+// one the agenda covers.
+function khalRangeArgs(startMs, days, formats) {
+  var args = KHAL_WRAPPER.concat(["list"])
+  for (var i = 0; i < JSON_FIELDS.length; i++) args.push("--json", JSON_FIELDS[i])
+  args.push("--day-format", "", formatKhalDate(startMs, formats.longdate), Math.max(1, days) + "d")
+  return args
+}
+
+// The span fetched for a month: from six days before the 1st to 41 days
+// after it, which covers the six-week grid whatever day the week starts on.
+function monthRange(year, month) {
+  return { start: new Date(year, month, -5).getTime(), days: 48 }
+}
+
+function monthKey(year, month) {
+  return year + "-" + pad(month + 1)
 }
 
 // khal prints one JSON array per day that has events. Multi-day events repeat
@@ -259,24 +319,6 @@ function isSameDay(a, b) {
   return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate()
 }
 
-// The event the bar should show: the current or next timed event today.
-// A long block (over three hours, or spanning days) only shows while nothing
-// else is coming up today, so it does not hide the meetings inside it.
-function nextEvent(events, now) {
-  var ongoingLong = null
-  for (var i = 0; i < events.length; i++) {
-    var ev = events[i]
-    if (ev.allDay || ev.end <= now) continue
-    if (!isSameDay(ev.start, now) && ev.start > now) continue
-    if (ev.start <= now && ev.end - ev.start > 3 * 3600000) {
-      if (!ongoingLong) ongoingLong = ev
-      continue
-    }
-    return ev
-  }
-  return ongoingLong
-}
-
 function pad(n) { return n < 10 ? "0" + n : String(n) }
 
 function formatClock(ms, use24h) {
@@ -292,17 +334,6 @@ function formatUntil(ms, now) {
   if (minutes < 60) return "in " + minutes + "m"
   var h = Math.floor(minutes / 60), m = minutes % 60
   return "in " + h + "h" + (m ? " " + m + "m" : "")
-}
-
-function truncate(text, max) {
-  text = String(text || "")
-  return max > 0 && text.length > max ? text.substr(0, Math.max(1, max - 1)) + "…" : text
-}
-
-function barLabel(ev, now, use24h, maxTitle) {
-  if (!ev) return ""
-  var when = ev.start <= now ? "now" : formatClock(ev.start, use24h)
-  return when + " " + truncate(ev.title, maxTitle)
 }
 
 // omarchy-notification-send reads leading "-x" arguments as options.
@@ -352,6 +383,39 @@ function agendaRows(events, now) {
     rows.push({ kind: "event", event: ev })
   }
   return rows
+}
+
+// Rows for one chosen day: its heading, then every event that touches it.
+function dayAgendaRows(events, dayMs, now) {
+  var from = startOfDay(dayMs)
+  var to = new Date(from)
+  to.setDate(to.getDate() + 1)
+  var rows = [{ kind: "day", label: dayHeading(from, now) }]
+  for (var i = 0; i < events.length; i++) {
+    var ev = events[i]
+    if (ev.start < to.getTime() && Math.max(ev.end, ev.start + 1) > from) rows.push({ kind: "event", event: ev })
+  }
+  return rows
+}
+
+// Calendar colors of the events on each day, keyed like the month grid
+// ("yyyy-MM-dd"), at most three per day. An event ending exactly at
+// midnight does not mark the day after.
+function eventsByDay(events) {
+  var out = {}
+  for (var i = 0; i < events.length; i++) {
+    var ev = events[i]
+    var cursor = new Date(startOfDay(ev.start))
+    for (var n = 0; n < 62; n++) {
+      if (n > 0 && cursor.getTime() >= ev.end) break
+      var key = cursor.getFullYear() + "-" + pad(cursor.getMonth() + 1) + "-" + pad(cursor.getDate())
+      var colors = out[key] || (out[key] = [])
+      var color = ev.color || ""
+      if (colors.length < 3 && colors.indexOf(color) === -1) colors.push(color)
+      cursor.setDate(cursor.getDate() + 1)
+    }
+  }
+  return out
 }
 
 function startOfDay(ms) {

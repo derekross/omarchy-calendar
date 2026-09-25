@@ -90,18 +90,10 @@ test("notifies once, inside the lead window, never for all-day", () => {
   same(Object.keys(M.pruneNotified(notified, now + 3 * 86400000)), [])
 })
 
-test("bar shows the current or next timed event today only", () => {
-  const events = M.parseEvents(JSON.stringify([
-    row({ uid: "past", "start-time": "09:00", "end-time": "10:00" }),
-    row({ uid: "now", "start-time": "17:30", "end-time": "18:30" }),
-    row({ uid: "tomorrow", "start-date-long": "2026-09-25", "end-date-long": "2026-09-25" })
-  ]), ISO)
+test("formats the time until an event", () => {
   const at = (h, m) => new Date(2026, 8, 24, h, m).getTime()
-  assert.equal(M.nextEvent(events, at(17, 45)).uid, "now")
-  assert.equal(M.barLabel(M.nextEvent(events, at(17, 45)), at(17, 45), true, 20), "now T")
-  assert.equal(M.nextEvent(events, at(19, 0)), null)
   assert.equal(M.formatUntil(at(18, 0), at(16, 50)), "in 1h 10m")
-  assert.equal(M.truncate("A long event title", 8), "A long …")
+  assert.equal(M.formatUntil(at(18, 0), at(18, 0)), "now")
 })
 
 test("agenda groups by day and hides finished events", () => {
@@ -228,13 +220,62 @@ test("notifies within the grace window, including lead time 0", () => {
   assert.equal(M.dueNotifications(events, at(14, 47, 30), 10, {}).length, 0)
 })
 
-test("a long ongoing block does not hide the next meeting", () => {
+test("escapes notification titles that look like options", () => {
+  assert.equal(M.notificationTitle({ title: "-r test" }).charAt(0), "\u2060")
+})
+
+test("writes dates back in khal's own longdateformat", () => {
+  const day = new Date(2026, 2, 5).getTime()
+  const cases = [
+    ["2013-12-21", "2026-03-05"],
+    ["21.12.2013", "05.03.2026"],
+    ["12/21/2013", "03/05/2026"],
+    ["21/12/13", "05/03/26"],
+    ["Saturday, December 21, 2013", "Thursday, March 05, 2026"],
+    ["Sat 21 Dec 2013", "Thu 05 Mar 2026"]
+  ]
+  for (const [sample, expected] of cases) {
+    assert.equal(M.formatKhalDate(day, sample), expected, sample)
+    const f = formats(sample, "21:45")
+    assert.equal(f.error, "", sample)
+    same(M.parseDate(expected, f.date), { year: 2026, month: 3, day: 5 }, sample)
+  }
+})
+
+test("builds the khal range command for a month's grid", () => {
+  const range = M.monthRange(2026, 8)
+  assert.equal(new Date(range.start).getDate(), 26)
+  assert.equal(new Date(range.start).getMonth(), 7)
+  same(M.khalRangeArgs(range.start, range.days, formats("21.12.2013", "21:45")).slice(-4),
+    ["--day-format", "", "26.08.2026", "48d"])
+  assert.equal(M.monthKey(2026, 8), "2026-09")
+})
+
+test("marks each day an event touches, with up to three colors", () => {
+  const events = M.parseEvents([
+    JSON.stringify([
+      row({ uid: "trip", "calendar-color": "#ff0000", "all-day": "True", "start-time": "", "end-time": "", "end-date-long": "2026-09-26" }),
+      row({ uid: "late", "calendar-color": "#00ff00", "start-time": "22:00", "end-date-long": "2026-09-25", "end-time": "00:00" }),
+      row({ uid: "a", "calendar-color": "#0000ff" }),
+      row({ uid: "b", "calendar-color": "#ffff00" }),
+      row({ uid: "c", "calendar-color": "#0000ff" })
+    ])
+  ].join("\n"), ISO)
+  const days = M.eventsByDay(events)
+  same(Object.keys(days).sort(), ["2026-09-24", "2026-09-25", "2026-09-26"])
+  // Sorted by start, so the 22:00 event is the fourth color and is dropped.
+  same(days["2026-09-24"], ["#ff0000", "#0000ff", "#ffff00"])
+  same(days["2026-09-25"], ["#ff0000"])
+})
+
+test("lists a chosen day's events, including ones that span it", () => {
   const events = M.parseEvents(JSON.stringify([
     row({ uid: "conf", "start-date-long": "2026-09-23", "start-time": "09:00", "end-date-long": "2026-09-25", "end-time": "17:00" }),
-    row({ uid: "standup", "start-time": "15:00", "end-time": "15:15" })
+    row({ uid: "evening" }),
+    row({ uid: "midnight", "start-date-long": "2026-09-23", "start-time": "23:00", "end-date-long": "2026-09-24", "end-time": "00:00" }),
+    row({ uid: "next", "start-date-long": "2026-09-25", "end-date-long": "2026-09-25" })
   ]), ISO)
-  const at = (h, m) => new Date(2026, 8, 24, h, m).getTime()
-  assert.equal(M.nextEvent(events, at(14, 0)).uid, "standup")
-  assert.equal(M.nextEvent(events, at(16, 0)).uid, "conf")
-  assert.equal(M.notificationTitle({ title: "-r test" }).charAt(0), "\u2060")
+  const now = new Date(2026, 8, 20, 12, 0).getTime()
+  const rows = M.dayAgendaRows(events, new Date(2026, 8, 24, 15, 0).getTime(), now)
+  same(rows.map(r => r.kind === "day" ? r.label : r.event.uid), ["Thursday, Sep 24", "conf", "evening"])
 })
