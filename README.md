@@ -1,5 +1,7 @@
 # Omarchy Calendar Clock
 
+![The calendar popup with demo events](preview.png)
+
 An [Omarchy](https://omarchy.org) shell plugin that adds your calendar to Omarchy's clock:
 
 - **Clock.** Takes the place of Omarchy's built-in clock in the bar. The label, its formats and the right-click format cycle work the same.
