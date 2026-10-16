@@ -63,11 +63,16 @@ Item {
     timeFormat = String(s.timeFormat || "Match khal")
     mapsProvider = String(s.mapsProvider || "Google Maps")
     syncCommand = s.syncCommand === undefined || s.syncCommand === null ? "vdirsyncer sync" : String(s.syncCommand)
-    // Nothing syncs or notifies until the user's settings are in.
-    if (!settled) {
-      settled = true
-      Qt.callLater(checkNotifications)
-    }
+    // Nothing syncs or notifies until the user's settings are in. The bar
+    // can push an empty entry and then the real one in the same turn, so
+    // settle once the turn is over, on whatever arrived last.
+    if (!settled) Qt.callLater(settle)
+  }
+
+  function settle() {
+    if (settled) return
+    settled = true
+    checkNotifications()
   }
 
   onAgendaDaysChanged: Qt.callLater(refresh)
